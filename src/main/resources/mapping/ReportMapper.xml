@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd" >
+<mapper namespace="com.ads.mapper.ReportMapper" >
+  <resultMap id="BaseResultMap" type="com.ads.model.Report" >
+    <id column="id" property="id" jdbcType="INTEGER" />
+    <result column="createDate" property="createdate" jdbcType="TIMESTAMP" />
+    <result column="channel" property="channel" jdbcType="CHAR" />
+    <result column="request" property="request" jdbcType="VARCHAR" />
+    <result column="fill" property="fill" jdbcType="VARCHAR" />
+    <result column="impression" property="impression" jdbcType="VARCHAR" />
+    <result column="click" property="click" jdbcType="VARCHAR" />
+    <result column="ctr" property="ctr" jdbcType="VARCHAR" />
+    <result column="rev" property="rev" jdbcType="VARCHAR" />
+    <result column="ecpm" property="ecpm" jdbcType="VARCHAR" />
+  </resultMap>
+  <sql id="Base_Column_List" >
+    id, createDate, channel, request, fill, impression, click, ctr, rev, ecpm
+  </sql>
+  <select id="selectByPrimaryKey" resultMap="BaseResultMap" parameterType="java.lang.Integer" >
+    select 
+    <include refid="Base_Column_List" />
+    from report
+    where id = #{id,jdbcType=INTEGER}
+  </select>
+  <delete id="deleteByPrimaryKey" parameterType="java.lang.Integer" >
+    delete from report
+    where id = #{id,jdbcType=INTEGER}
+  </delete>
+  <insert id="insert" parameterType="com.ads.model.Report" >
+    insert into report (id, createDate, channel, 
+      request, fill, impression, 
+      click, ctr, rev, ecpm
+      )
+    values (#{id,jdbcType=INTEGER}, #{createdate,jdbcType=TIMESTAMP}, #{channel,jdbcType=CHAR}, 
+      #{request,jdbcType=VARCHAR}, #{fill,jdbcType=VARCHAR}, #{impression,jdbcType=VARCHAR}, 
+      #{click,jdbcType=VARCHAR}, #{ctr,jdbcType=VARCHAR}, #{rev,jdbcType=VARCHAR}, #{ecpm,jdbcType=VARCHAR}
+      )
+  </insert>
+  <insert id="insertSelective" parameterType="com.ads.model.Report" >
+    insert into report
+    <trim prefix="(" suffix=")" suffixOverrides="," >
+      <if test="id != null" >
+        id,
+      </if>
+      <if test="createdate != null" >
+        createDate,
+      </if>
+      <if test="channel != null" >
+        channel,
+      </if>
+      <if test="request != null" >
+        request,
+      </if>
+      <if test="fill != null" >
+        fill,
+      </if>
+      <if test="impression != null" >
+        impression,
+      </if>
+      <if test="click != null" >
+        click,
+      </if>
+      <if test="ctr != null" >
+        ctr,
+      </if>
+      <if test="rev != null" >
+        rev,
+      </if>
+      <if test="ecpm != null" >
+        ecpm,
+      </if>
+    </trim>
+    <trim prefix="values (" suffix=")" suffixOverrides="," >
+      <if test="id != null" >
+        #{id,jdbcType=INTEGER},
+      </if>
+      <if test="createdate != null" >
+        #{createdate,jdbcType=TIMESTAMP},
+      </if>
+      <if test="channel != null" >
+        #{channel,jdbcType=CHAR},
+      </if>
+      <if test="request != null" >
+        #{request,jdbcType=VARCHAR},
+      </if>
+      <if test="fill != null" >
+        #{fill,jdbcType=VARCHAR},
+      </if>
+      <if test="impression != null" >
+        #{impression,jdbcType=VARCHAR},
+      </if>
+      <if test="click != null" >
+        #{click,jdbcType=VARCHAR},
+      </if>
+      <if test="ctr != null" >
+        #{ctr,jdbcType=VARCHAR},
+      </if>
+      <if test="rev != null" >
+        #{rev,jdbcType=VARCHAR},
+      </if>
+      <if test="ecpm != null" >
+        #{ecpm,jdbcType=VARCHAR},
+      </if>
+    </trim>
+  </insert>
+  <update id="updateByPrimaryKeySelective" parameterType="com.ads.model.Report" >
+    update report
+    <set >
+      <if test="createdate != null" >
+        createDate = #{createdate,jdbcType=TIMESTAMP},
+      </if>
+      <if test="channel != null" >
+        channel = #{channel,jdbcType=CHAR},
+      </if>
+      <if test="request != null" >
+        request = #{request,jdbcType=VARCHAR},
+      </if>
+      <if test="fill != null" >
+        fill = #{fill,jdbcType=VARCHAR},
+      </if>
+      <if test="impression != null" >
+        impression = #{impression,jdbcType=VARCHAR},
+      </if>
+      <if test="click != null" >
+        click = #{click,jdbcType=VARCHAR},
+      </if>
+      <if test="ctr != null" >
+        ctr = #{ctr,jdbcType=VARCHAR},
+      </if>
+      <if test="rev != null" >
+        rev = #{rev,jdbcType=VARCHAR},
+      </if>
+      <if test="ecpm != null" >
+        ecpm = #{ecpm,jdbcType=VARCHAR},
+      </if>
+    </set>
+    where id = #{id,jdbcType=INTEGER}
+  </update>
+  <update id="updateByPrimaryKey" parameterType="com.ads.model.Report" >
+    update report
+    set createDate = #{createdate,jdbcType=TIMESTAMP},
+      channel = #{channel,jdbcType=CHAR},
+      request = #{request,jdbcType=VARCHAR},
+      fill = #{fill,jdbcType=VARCHAR},
+      impression = #{impression,jdbcType=VARCHAR},
+      click = #{click,jdbcType=VARCHAR},
+      ctr = #{ctr,jdbcType=VARCHAR},
+      rev = #{rev,jdbcType=VARCHAR},
+      ecpm = #{ecpm,jdbcType=VARCHAR}
+    where id = #{id,jdbcType=INTEGER}
+  </update>
+</mapper>
