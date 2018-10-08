@@ -121,23 +121,18 @@ public class ArrayCode {
         [1,4,6,4,1],
         [1,5,10,10,5,1]
      ]
-     * @param args
+     * @param numRows
      */
-    public static void pascalTriangle(String[] args){
-        int size=args.length;
+    public static void pascalTriangle(int numRows){
+        int[][] ints = new int[numRows][];
         //for ()
     }
 
-    public static void main(String[] args){
+    public static void main(String[] args) {
 //        System.out.println(removeElementI(new String[]{"1", "2", "2", "3", "5","10"},"2"));
 //        System.out.println(removeElementII(new String[]{"1", "2", "2", "3","4","4","5","10","20","20"}));
 //        System.out.println(removeElementIII(new String[]{"1", "2", "2","2","3","3","4","4","5","10","20","20","20"}));
-
-        int[] ints = plusOne(new int[]{1, 2, 3, 4, 9, 9, 7});
-        for (int i: ints) {
-            System.out.println(i);
-        }
-
+//        plusOne(new int[]{1, 2, 3, 4, 9, 9, 7});
 
     }
 }
