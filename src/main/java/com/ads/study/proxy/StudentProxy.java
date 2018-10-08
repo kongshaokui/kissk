@@ -22,8 +22,8 @@ public class StudentProxy implements Person{
     }
 
     public static void main(String[] args){
-        StudentProxy studentProxy = new StudentProxy(new Student("李斯"));
-        studentProxy.setMoney();
+//        StudentProxy studentProxy = new StudentProxy(new Student("李斯"));
+//        studentProxy.setMoney();
     }
 
 }
