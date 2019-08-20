@@ -90,8 +90,5 @@ public class ThreadPool {
 //        scheduledPool();
 
         System.out.println(1 << 30);
-        System.out.println("git第一次提交");
-        System.out.println("git第二次提交");
-        System.out.println("git第三次提交");
     }
 }
