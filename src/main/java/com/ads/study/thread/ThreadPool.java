@@ -90,6 +90,6 @@ public class ThreadPool {
 //        scheduledPool();
 
         System.out.println(1 << 30);
-
+        System.out.println("第一次验证");
     }
 }
