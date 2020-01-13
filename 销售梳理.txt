@@ -1,0 +1,470 @@
+0、全局变量取值
+     BatchType,BusinessTypeID,NegBatchIgnoreAdj(批次类型是溢余，并且设置了参数NegBatchIgnoreAdj，那么差异不算成本，而算成调整)
+
+1、取数据 id升序 每次处理1000;  ps:数据处理失败加标识(失败表)  不然累计失败1000次就废了
+     select ID, dDealDate, nBatchID, nGoodsID, nVendorID, -nLeftQty,
+     -nLeftAmount, nBatchPrice, sBatchTypeID, dBatchDate, sStoreNO, sContractNO, nFGoodsID=nGoodsID,
+     dTradeDate=dBatchDate, sPosNO=substring(sPaperNO, 1, 3), nSerID=convert(numeric(4), substring(sPaperNO,4,4)),
+     nItem=convert(numeric(3), substring(sPaperNO,8,3)), sOption, sPaperNO, sLocatorNO
+     from rj_TmpBatch where sBatchTypeID='3' and nLeftQty<0 order by code limit 1000;
+
+     // @SaleAmount = rj_TmpBatch.nLeftAmount;  库存批次每次循环都会重新计算这个rj_TmpBatch.nLeftAmount 值 供下次库存批次使用
+2、遍历数据
+    foreach{
+       //模板模式、策略模式
+
+       1、门店数据获取、验证
+          select sStoreTypeID from tStore where sStoreNO=StoreNO
+          if(StoreNO==null){
+                errorDate();//异常数据处理;
+                continue;
+          }
+
+          if(sStoreTypeID==3 and LocatorNO==null){ //配送中心 没有储位
+                 errorDate();//异常数据处理;
+                 continue;
+          }
+
+       2、商品数据获取、验证
+            select TGoods from tGoods where nGoodsID=GoodsID
+            //***分割商品在验证
+            if(IsFreshSplit == 1) {
+                select @IsFreshSplit = dbo.fn_IsFreshSplitDataOK(StoreNO, GoodsID)
+            }
+
+
+       3、分类、柜组数据获取
+           if(BusinessTypeID='E'){
+               select @CategoryNO=sOrgNO from tStoreGoodsOrg where sStoreNO=StoreNO and nGoodsID=GoodsID
+           }else{
+                select @CategoryNO = sCategoryNO from tCategory where nCategoryID=@TGoods.nCategoryID
+           }
+
+       4、pos售价金额、折扣金额、销售人NO、pos机NO
+            PosSalePrice、@DisAmount、SalesClerkNO、sCardNO
+            //pos售价金额、
+            //折扣金额:初始值tPosSaleDtl.nDisAmount 库存批次每次循环都会重新计算这个@DisAmount 值 供下次库存批次使用
+            //销售人NO
+            SELECT nSalePrice,nDisAmount,sSalesClerkNO FROM tPosSaleDtl
+                 WHERE dTradeDate=dBatchDate and sStoreNO=StoreNO and sPosNO=PosNO and nSerID=PosSerID and nItem=PosItem
+
+            //pso卡号
+            select @CardNO=sCardNO from tPosSale
+                where dTradeDate=dBatchDate and sStoreNO=StoreNO and sPosNO=PosNO and nSerID=PosSerID
+
+       4.5***、BOM处理、分割商品处理
+          // TODO:bom方式处理(可以不处理)
+          // ***TODO:分割商品 批次处理 fx:rj_Batch_MakeSplit  ***需要与主代码 拆分
+
+       5、查询可用库存批次
+            select nBatchID, nVendorID, nActionQty, nBatchPrice, sContractNO, sTradeModeID, nBuyTaxPct, nRatio, sBatchTypeID
+                            from tStockBatch where sStoreNO=StoreNO and nGoodsID=GoodsID and nActionQty>0
+                            and (ISNULL(sLocatorNO,'')=isnull(@LocatorNO, '') or isnull(@LocatorNO, '') = '')
+
+       6、遍历 可用库存批次
+            foreach{
+                BigDecimal CQty = new BigDecimal();
+                BigDecimal RQty = new BigDecimal();
+                BigDecimal CAm = new BigDecimal();
+                1、当前库存批次扣除判断
+                    if( (当前库存批次).nActionQty  》= rj_TmpBatch(当前扣减批次).nLeftQty){ //改库存批次可直接扣减完成
+
+                        /**更新当前库存批次**/
+                        //looger.info();
+                        CQty=rj_TmpBatch(当前扣减批次).nLeftQty;
+                        RQty=rj_TmpBatch(当前扣减批次).nLeftQty;
+                        CAmt=@SaleAmount;
+
+                    }else{  //该库存批次不够扣减，该批次nActionQty 更新为0，批次扣减数量为该批次nActionQty
+                        //looger.info();
+                        CQty=nActionQty;
+                        RQty=nActionQty;
+                        CAmt=round(@SaleAmount/rj_TmpBatch(当前扣减批次).nLeftQty * nActionQty,2);
+
+                        //当前库存批次扣减完成后，销售扣减剩余要处理 扣减数量
+                    }
+
+                2、各种更新、插入
+                    1、入库更新前 必要数据验证和查询
+                        1、处理合同  如果当前库存批次合同号为null 根据门店、商品和供应商查询合同号
+                            select  sContractNO from tStoreGoodsVendor where sStoreNO= StoreNO and nGoodsID= GoodsID and nVendorID= NewVendorID
+
+                        2、交易方式查询  如果当前库存批次交易方式为null 根据合同号逐次查询交易方式
+                            if 当前库存批次交易方式 TradeModeID is null
+                              select TradeModeID = sTradeModeID from tContract where sContractNO = sContractNO
+                            if TradeModeID is null
+                              select TradeModeID=sTradeModeID from tStoreGoodsVendor where sStoreNO=StoreNO and nGoodsID=GoodsID and nVendorID=NewVendorID
+                            if TradeModeID is null select TradeModeID='1'   //枚举值 TradeModeIdEnum 1 购销
+
+                        3、代营 ：TradeModeID = 6  将来不会用 暂时留个口子
+                             //代营取了次比例 重新计算 (当前库存批次)的nBatchPrice批次价
+                              //select @Ratio = nRealRatio*0.01 from tStoreGoodsVendor where sStoreNO=@StoreNO and nVendorID=@NewVendorID and nGoodsID=@GoodsID and sTradeModeID='6'
+                              //select nBatchPrice = ROUND(@CAmt*(1-@Ratio)/@CQty,4)
+
+                    2、更新StockBatch(当前库存批次)，同时插入记录日志 tStockBatchLog
+                         //looger.info();
+                        1、更新tStockBatch
+                            update tStockBatch set nActionQty=(当前库存批次).nActionQty-CQty(楼上赋值参数), dLastDownTime =now(), dLastUpdateTime=now()
+                            where sStoreNO=StoreNO and nBatchID=(当前库存批次)nBatchID;
+
+                        2、插入tStockBatchLog
+                            insert into tStockBatchLog(
+                                sStoreNO = StoreNO,
+                                nBatchID = tStockBatch(当前库存批次).nBatchID,
+                                nSerID = 生成个serID, //TODO:select @SerID=max(nSerID)+1 from tStockBatchLog with (nolock) where sStoreNO=StoreNO and nBatchID=(当前库存批次)nBatchID,
+                                nGoodsID = nGoodsID,
+                                nVendorID = rj_TmpBatch(当前扣减批次).nVendorID,
+                                sBatchTypeID =  rj_TmpBatch(当前扣减批次).sBatchTypeID,
+                                sBatchType = BatchType (全局变量),
+                                nBatchQty = CQty(楼上赋值参数),
+                                nBatchPrice = (当前库存批次)nBatchPrice  //TradeModeID = 6 时 该值已经别重新计算 是计算后的值,
+                                dBatchDate = rj_TmpBatch(当前扣减批次).dTradeDate,    //批次日期
+                                nDirection = -1,
+                                sRecNO = isnull(rj_TmpBatch(当前扣减批次).sPaperNO,''),
+                                nBuyTaxPct = (当前库存批次).nBuyTaxPct   //税比
+                            )
+
+                    3、插入rj_DealBatch数据
+                         insert into rj_DealBatch(
+                            dDealDate = now(),//TODO：当前时间(存储过程是指定时间处理)
+                            TmpID = rj_TmpBatch(当前扣减批次).code,
+                            nType = case when rj_TmpBatch(当前扣减批次).nBatchID is not null then 3 else 1 end,  //3：代表是冲减 rj_TmpBatch.nBatchID 不为空为业务处理(标识) 正常为null
+                            nBatchID = (当前库存批次).nBatchID,
+                            sBatchTypeID = case when (rj_TmpBatch(当前扣减批次).nBatchID is not null and 当前库存批次类型ID(sBatchTypeID)='5' and NegBatchIgnoreAdj(全局变量)=1) then '8' else rj_TmpBatch(当前扣减批次).BatchTypeID end,
+                            nGoodsID = rj_TmpBatch(当前扣减批次).nGoodsID,
+                            nTmpVendorID = rj_TmpBatch(当前扣减批次).nVendorID ,
+                            nRealVendorID = (当前库存批次).nVendorID,
+                            nQty = - RQty (楼上赋值参数:当前处理数量 ，加库存用正，减库存用负),
+                            nAmount = - CAmt (楼上赋值参数:当前处理销售金额，  对应的销售金额，非销售一般填null),
+                            nTmpBatchPrice = rj_TmpBatch(当前扣减批次).nBatchPrice,
+                            nRealBatchPrice case when (TradeModeID='6' and t(楼上赋值) = rj_TmpBatch(当前扣减批次).sContractNO then rj_TmpBatch(当前扣减批次).nBatchPrice else (当前库存批次).nBatchPrice end ,
+                            sStoreNO = sStoreNO,
+                            dLastUpdateTime = now(),
+                            sContractNO = sContractNO,     //合同编码(楼上赋值)
+                            sTradeModeID = TradeModeID,    //交易方式(楼上赋值)
+                            nTaxPct = (当前库存批次).nBuyTaxPct,  //税比
+                            sTmpContractNO =  rj_TmpBatch(当前扣减批次).sContractNO,
+                            sLocatorNO = rj_TmpBatch(当前扣减批次).sLocatorNO,    //储位，配送中心业务，基本都要写入
+                         )
+
+                    4、更新rj_TmpBatch(当前扣减批次)数据
+                        //rj_TmpBatch 存的负值 再做减法？？？
+                        update rj_TmpBatch set nLeftQty=rj_TmpBatch.nLeftQty-RQty, nLeftAmount=nLeftAmount-CAmt where ID=rj_TmpBatch.TmpID
+
+
+                    5***、分割商品 要记录最后成本价  // ***TODO:分割商品  ***需要与主代码 拆分
+                         if(IsFreshSplit=1){ //rj_TmpBatch.sBatchTypeID !=5 ,BatchTypeIdEnums 5：盈余  查询rj_TmpBatch的时候已经判断sBatchTypeID=3 了 这里不需要判断了
+                            //insertOrUpdate for tStoreGoodsOtherInfo
+                            1、查询是否存在
+                                select 1 from tStoreGoodsOtherInfo where sStoreNO=StoreNO and nGoodsID = GoodsID and sTypeID='LastCost'
+                            2、存在更新
+                                update tStoreGoodsOtherInfo set
+                                    nVendorID=tStockBatch.nVendorID,
+                                    sContractNO=sContractNO, //合同
+                                    nValue1=tStockBatch(当前库存批次).nBatchPrice,
+                                    nValue2=tStockBatch.nBuyTaxPct,
+                                    nValue3=null,
+                                    sValue1=TradeModeID,  //交易方式
+                                    dLastUpdateTime=now()
+                                where sStoreNO=StoreNO and nGoodsID = GoodsID and sTypeID='LastCost'
+                            3、不存在插入
+                                insert into tStoreGoodsOtherInfo(
+                                    sStoreNO = StoreNO,
+                                    nGoodsID = GoodsID,
+                                    sTypeID = 'LastCost',
+                                    sType = '最后成本价',
+                                    nVendorID = tStockBatch.nVendorID,
+                                    sContractNO = sContractNO, //合同,
+                                    sMemo = null,
+                                    sValue1 = TradeModeID, //交易方式
+                                    sValue2 = null,
+                                    sValue3 = null,
+                                    nValue1 = tStockBatch(当前库存批次).nBatchPrice,,
+                                    nValue2 = tStockBatch.nBuyTaxPct,
+                                    nValue3 = 母商品Id, //储存过程没有赋值 直接是null??
+                                    dLastUpdateTime = now()
+                                )
+                         }
+
+                    /***
+                    *  rj_TmpBatch.nBatchID 为空不为空的业务处理
+                    */
+                    6、 条件：rj_TmpBatch.nBatchID == null  插入tPosSaleCost成本表
+                        if(rj_TmpBatch(当前扣减批次).nBatchID == null ){  //不为空 是业务处理 不考虑  TODO:还没想为什么不考虑 负批次成本也会影响
+                            1、生成nSort
+                                select nSort =max(nSort)+1 from tPosSaleCost where dTradeDate= rj_TmpBatch(当前扣减批次).dBatchDate and sStoreNO=StoreNO
+                                    and sPosNO=substring(rj_TmpBatch(当前扣减批次).sPaperNO, 1, 3)
+                                    and nSerID=substring(rj_TmpBatch(当前扣减批次).sPaperNO, 4, 4)
+                                    and nItem=substring(rj_TmpBatch(当前扣减批次).sPaperNO, 8, 3)
+
+                            2、数据插入
+                                insert into tPosSaleCost(
+                                    dTradeDate = rj_TmpBatch(当前扣减批次).dBatchDate ,
+                                    sStoreNO = StoreNO,
+                                    sPosNO = substring(rj_TmpBatch(当前扣减批次).sPaperNO, 1, 3),
+                                    nSerID = substring(rj_TmpBatch(当前扣减批次).sPaperNO, 4, 4),
+                                    nItem = substring(rj_TmpBatch(当前扣减批次).sPaperNO, 8, 3),
+                                    nSort = (刚生成热乎)nSort,
+                                    nGoodsID = nGoodsID ,
+                                    nSaleQty = RQty(楼上赋值参数),
+                                    nSalePrice = round(tPosSaleDtl.nSalePrice,2),  //pos售价金额
+                                    nSaleAmount = CAmt(楼上赋值参数),
+                                    nDisAmount = case when @SaleAmount = 0 then @DisAmount else round(CAmt(楼上赋值参数)/@SaleAmount * @DisAmount,2) end,  //折扣金额
+                                    sMemo = rj_TmpBatch.sOption,
+                                    nSaleCost = round(RQty * (当前库存批次)nBatchPrice,2),     //TradeModeID = 6 时 nBatchPrice该值已经别重新计算 是计算后的值
+                                    nVendorID = tStockBatch(当前库存批次).nVendorID,
+                                    sContractNO = sContractNO, //合同号
+                                    nRatio = tStockBatch.nRatio, //TradeModeID = 6 时 nRatio是重新取的值
+                                    nTaxPct = tStockBatch.nBuyTaxPct,
+                                    sTradeModeID = TradeModeID, //交易方式
+                                    dDailyDate = now(),  //@rq 原存储过程是 传的参数
+                                    sSalesClerkNO = tPosSaleDtl.sSalesClerkNO,
+                                    sCategoryNO = @CategoryNO, //大3楼取的 分类
+                                    sCardNO = tPosSale.sCardNO, //大4楼查询的 pso卡号
+                                    dLastUpdateTime = now()
+                                )
+                        }
+
+                    7、 条件：rj_TmpBatch.nBatchID != null  更新tStockBatch成本表 //冲减不为空 还有什么也不为空?????
+
+                        1、再次更新tStockBatch
+                            //上面更新字段为 nActionQty
+                            //本次更新 nBatchQty (基本没用还更新????)、nPendingQty(暂置未处理数量，批次数量)、nAmount(暂置的销售金额或调整金额)
+                            //TODO：两次更新 应该想办法统一处理
+                            update tStockBatch set nBatchQty=nBatchQty+CQty, nPendingQty=nPendingQty-CQty, nAmount=nAmount+CAmt,
+                                 dLastDownTime = now(), dLastUpdateTime= now()          //再次更新了这两个时间 会覆盖上面更新赋值
+                                 where sStoreNO=StoreNO and nBatchID=rj_TmpBatch.nBatchID
+
+                        2、插入tStockBatchLog 难兄难弟
+
+                            insert into tStockBatchLog(sStoreNO, nBatchID, nSerID, nGoodsID, nVendorID, sBatchTypeID,
+                                    sBatchType, nBatchQty, nBatchPrice, dBatchDate, nDirection, sRecNO, nBuyTaxPct)
+                                  values(@StoreNO, @OldBatchID, dbo.fn_BatchLogSerID(@StoreNO, @OldBatchID), @GoodsID, @OldVendorID, @BatchTypeID,
+                                    @BatchType, @CQty, @NewBatchPrice, @TradeDate, 1, isnull(@PaperNO,''), @Tax)
+
+                            insert into tStockBatchLog(sStoreNO, nBatchID, nSerID, nGoodsID, nVendorID, sBatchTypeID,
+                                     sBatchType, nBatchQty, nBatchPrice, dBatchDate, nDirection, sRecNO, nBuyTaxPct)
+                                values(@StoreNO, @NewBatchID, dbo.fn_BatchLogSerID(@StoreNO, @NewBatchID), @GoodsID, @NewVendorID, @BatchTypeID,
+                                    @BatchType, @CQty, @NewBatchPrice, @TradeDate, -1, isnull(@PaperNO,''), @Tax)
+
+                            insert into tStockBatchLog(
+                                sStoreNO = StoreNO,
+                                nBatchID = rj_TmpBatch.nBatchID,  //楼上插入日志是tStockBatch(当前库存批次).nBatchID  这里不一样
+                                nSerID = 生成个serID, //TODO:select @SerID=max(nSerID)+1 from tStockBatchLog with (nolock) where sStoreNO=StoreNO and nBatchID = rj_TmpBatch.nBatchID,
+                                nGoodsID = nGoodsID,
+                                nVendorID = rj_TmpBatch(当前扣减批次).nVendorID,
+                                sBatchTypeID =  rj_TmpBatch(当前扣减批次).sBatchTypeID,
+                                sBatchType = BatchType (全局变量),
+                                nBatchQty = CQty(楼上赋值参数),
+                                nBatchPrice = (当前库存批次)nBatchPrice  //TradeModeID = 6 时 该值已经别重新计算 是计算后的值,
+                                dBatchDate = rj_TmpBatch(当前扣减批次).dTradeDate,    //批次日期
+                                nDirection = -1,
+                                sRecNO = isnull(rj_TmpBatch(当前扣减批次).sPaperNO,''),
+                                nBuyTaxPct = (当前库存批次).nBuyTaxPct   //税比
+                            )
+
+                        8、劫后余生:
+                             计算结束条件:@Qty，= @Qty(rj_TmpBatch.nLeftQty)-CQty
+                             折扣金额:tPosSaleDtl.DisAmount-> @DisAmount  = @DisAmount - case when @SaleAmount=0 then @DisAmount else round(CAmt/@SaleAmount * @DisAmount,2) end
+                             销售价格:rj_TmpBatch.nLeftAmount -> @SaleAmount  = @SaleAmount - CAmt
+
+                        @Qty > 0 继续执行可用库存批次 直至可用循环结束 或 @Qty = 0
+            }
+
+            7、后时代处理
+
+                1****、@Qty > 0  and IsFreshSplit = 1   分割商品 扣减又不够的情况处理
+                    //存储过程直接结束 事务回滚
+                    java代码 要是按异常处理不回滚  拆分后的插入更新的批次数据怎么处理？？？
+
+                2、StoreTypeID = 3 (配送中心) and @Qty > 0 and rj_TmpBatch.nBatchID is null    //配送中心不能有负批次
+                    java代码 要是按异常处理不回滚  拆分后的插入更新的批次数据怎么处理？？？
+
+                3、负批次 处理  @Qty > 0 and rj_TmpBatch.nBatchID is null
+                    1、从主供应商取必要参数
+                        String @NewVendorID=null, @NewBatchPrice=null, @Tax=null, @Ratio = null, @TradeModeID = null,  @ContractNO = null
+                        fx：up_GetDefaultBuyPrice //TODO:从主供应商取上面参数的值
+
+                    2、
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+牵涉表：
+    tSystemCtrl   : 系统配置
+    tCommon       : 公共描述
+    rj_TmpBatch   : 批次
+    tGoods        ：商品
+    tComplexElement ：
+    tStoreGoods ： 门店商品
+    tPosSaleCost:
+    tStockBatch:
+
+@NewBatchID = tStockBatch.nBatchID
+
+流程：
+    1、查询处理组合商品，拆分并入库rj_TmpBatch表；
+          1、按组合比例生成和计算
+
+    2、系统配置取值处理：
+        1、pos机是否直接更新库存
+        2、批次业务、批次类型、批次优先级
+
+    -- 》》》》 cdeal 遍历开始 《《《《
+    3、查询所有待处理批次，遍历处理：
+        1、查询商品类型、是否分割(nTag&2048)、分割比例; tGoods、tFreshGoodsSplit
+        2、分割数据判断计算(@Qty = round(@Qty/@FreshRatio,3)),对应数据不完成 不安分割处理,; tStoreGoods、tStoreGoodsVendor
+        3、取小票信息; tPosSale
+        4、判断业务类型 BusinessTypeID=E 取值CategoryNO、CategoryID; tStoreGoodsOrg、tCategory、tGoods
+
+    -- -- -- 事务开始 -- -- --
+    4、先判断一下，如果是原料是BOM，而且没有足够批次，那么先加工一下，暂时不考虑加工过程中批次有变化的情况  ？？;  tSystemCtrl
+        if(处理BOM批次):{
+                     1、又取商品类型GType、判断是否=BOM;tGoods
+                     2、
+                        if(BOM){
+                                1、查询该门店下该商品 sum(nActionQty);   tStockBatch
+                                2、生成PaperNO
+                                3、判断是否可售 if(qty-sum(nActionQty) >0){
+                                   执行储存过程: rj_Batch_MakeBOM
+                                   执行若有问题事务回滚,return;
+                                }
+                        }else{
+                            结束BOM批次处理
+                        }
+        }
+
+    5、
+       1、查询判断可用批次; tStockBatch (from tStockBatch where... nActionQty>0)
+       -- ******* cbatch 遍历开始 *******
+       -- -- 遍历执行条件 while (@Qty>0) -----
+       2、  if(剩余库存>= 批次销售数量){
+                // select @CQty = @Qty, @RQty = @Qty, @CAmt = @SaleAmount
+            }else{
+               //@CQty= @ActionQty, @RQty = @ActionQty, @CAmt = round(@SaleAmount/@Qty*@ActionQty,2)
+            }
+       3、是否为分割商品，分割商品:价格按分割比例重新计算下；销售数量乘以分割比例，价格=批次价格处理分割比例
+            select @RQty = round(@RQty * @FreshRatio,3), @RealBatchPrice = @NewBatchPrice,
+                    @NewBatchPrice = round(@NewBatchPrice/@FreshRatio, 4)
+                  /* 可能生鲜分割比例反算有差异的，判断一下，如果剩余待处理数量没了，那原始的分割的数量取全部 */
+                  ？？差异产生的条件
+                  if @CQty = @Qty and @RQty <> @OrgQty select @RQty = @OrgQty
+       4、合同号再次判断取值(第一次 在 5-1; tStockBatch) 根据供应ID 查询合同号 ；  tStoreGoodsVendor
+            select @ContractNO = sContractNO from tStoreGoodsVendor where sStoreNO=@StoreNO and nGoodsID=@GoodsID and nVendorID=@NewVendorID
+
+       5、取交易方式 TradeModeID ;tContract、tStoreGoodsVendor
+           if(代营){ ??
+            @Ratio = nRatio*0.01; tStoreGoodsVendor
+            重新算价格:NewBatchPrice = ROUND(@CAmt*(1-@Ratio)/@CQty,4)
+           }
+
+           插入rj_DealBatch表
+           {
+        6、第一次插入数据到rj_DealBatch 表 ;   ？？
+        7、判断是否为分割商品 是:
+                  1、第二次插入数据到rj_DealBatch 表; 母商品
+                  2、第三次次插入数据到rj_DealBatch 表; 子商品
+            }
+
+       8、rj_TmpBatch.nBatchID == null 插入POS成本表;
+           if(rj_TmpBatch.nBatchID == null || ""){  ？？ 批次为空的产生条件
+                1、生成PosSort = max(tPosSaleCost.nSort)+1 ;   tPosSaleCost
+                2、插入tPosSaleCost表
+           }
+
+       9、更新tStockBatch表
+            update tStockBatch set nActionQty=nActionQty-@CQty, dLastDownTime =GETDATE(), dLastUpdateTime=GETDATE()
+                    where sStoreNO=@StoreNO and nBatchID=tStockBatch.nBatchID
+
+       10、写入tStockBatchLog表;
+
+       11、更新rj_TmpBatch表
+            update rj_TmpBatch set nLeftQty=nLeftQty-@RQty, nLeftAmount=nLeftAmount-@CAmt where ID=rj_TmpBatch.code  /* 处理数量清为*/
+
+       12、rj_TmpBatch.nBatchID != null
+            1、更新tStockBatch表
+                 update tStockBatch set nBatchQty=nBatchQty+@CQty, nPendingQty=nPendingQty-@CQty, nAmount=nAmount+@CAmt,
+                         dLastDownTime =GETDATE(), dLastUpdateTime=GETDATE()
+                  where sStoreNO=@StoreNO and nBatchID=rj_TmpBatch.nBatchID
+
+            2、写入tStockBatchLog表;
+
+       13、有一次判断是否为分割商品,计算处理数量Qty、OrgQty
+                if(分割商品){
+                    select @OrgQty = @OrgQty - @RQty
+                    select @Qty=round(@OrgQty/@FreshRatio,3), @SaleAmount=@SaleAmount - @CAmt, @DisAmount = @DisAmount - case when @SaleAmount=0 then @DisAmount else round(@CAmt/@SaleAmount*@DisAmount,2) end
+                }else{
+                    select @Qty=@Qty-@CQty, @SaleAmount=@SaleAmount - @CAmt, @DisAmount = @DisAmount - case when @SaleAmount=0 then @DisAmount else round(@CAmt/@SaleAmount*@DisAmount,2) end
+                }
+
+       -- ******* cbatch 遍历结束 *******
+
+       14、如果有待处理数量没有扣减完增加负批次的数量、或者新增一个负批次
+
+            if(@Qty>0 and rj_TmpBatch.nBatchID is null){
+                NewBatchPrice、NewVendorID、TradeModeID
+                1、从主供应商取进价 执行 exec up_GetDefaultBuyPrice 储存过程
+                    exec up_GetDefaultBuyPrice @GoodsID, @StoreNO, @ContractNO out, @NewVendorID out, @NewBatchPrice out, @TradeModeID out, @Tax out
+
+                2、if(分割商品 and tStoreGoodsVendor.sTradeModeID in ('2','3')){
+                    exec up_GetDefaultBuyPrice @FGoodsID, @StoreNO, @ContractNO out, @NewVendorID out, @NewBatchPrice out, @TradeModeID out, @Tax out
+                }
+
+                3、if(@TradeModeID='6' and @NewBatchPrice>0 and @NewBatchPrice<1){
+                    //计算批次价格
+                    select @Ratio = @NewBatchPrice
+                    select @NewBatchPrice = ROUND(@SaleAmount*(1-@Ratio)/@Qty,4)
+                }
+
+                4、查找相同类型供应商、商品、进价的负批次 @NewBatchID
+                     select top 1 @NewBatchID=nBatchID, @Tax=nBuyTaxPct from tStockBatch where sStoreNO=@StoreNO and ...
+
+                5、存在相同负批次，更改批次数量
+                        if(@NewBatchID !=null){
+                               1、同：6、7、8  参数不一致
+                         }else{
+                             1、新增负批次
+                                取新批次号:  exec up_GetBatchID
+
+                             2、同：6、7  参数不一致，
+                             3、插入负批次 insert tStockBatch、插入日志 insert into tStockBatchLog
+                         }
+            }
+
+       15、处理数量清零:rj_TmpBatch
+             update rj_TmpBatch set nLeftQty=0, nLeftAmount=0 where ID=@TmpID
+
+       16、更新库存 (3.4 需要增加判断，如果是生鲜分割，并且分割商品的旧批次，就不用做这步了)
+           1、计算StockQty
+                select @StockQty = sum(nActionQty+nLockedQty-nPendingQty),
+                      @StockAmount = sum(round((nActionQty+nLockedQty-nPendingQty)*nBatchPrice,2))
+                      from tStockBatch where sStoreNO = @StoreNO and nGoodsID = @GoodsID
+           2、更新tStockAccount
+                update tStockAccount set nStockQty = @StockQty, nStockAmount = @StockAmount,
+                      nStockNetAmount = round(@StockAmount / isnull(@Tax, 1),2), nStockCost = round(@StockQty*nAvgCostPrice,2),
+                      nStockNetCost = round(@StockQty*nAvgCostPrice/isnull(@Tax, 1),2), dLastUpdateTime=getdate()
+                    where sStoreNO = @StoreNO and nGoodsID = @GoodsID
+
+        17、if(异常){
+                 事务回滚
+             }
+       --- -------事务提交----------
+       -- 》》》》 cdeal 遍历结束 《《《《
+
+       18、专门处理销售数量为0，销售金额不为的销售
+            exec rj_Batch_ZeroSale @StoreNO, @rq
+
+       19、 tPosSaleCost中的组合商品的成分成本，更新回组合商品
+            exec rj_ComArticlePosCost
+
+       ----------------------------------------------------------------------《end》---------------------------------------------------------------------------

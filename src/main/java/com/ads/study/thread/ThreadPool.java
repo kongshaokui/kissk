@@ -1,5 +1,7 @@
 package com.ads.study.thread;
 
+import com.google.common.collect.Maps;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.*;
@@ -83,13 +85,16 @@ public class ThreadPool {
     }
 
     public static void main(String[] args) throws Exception{
-        System.out.println(Integer.SIZE);
-//        cachedPool();
+        System.out.println(new String("1").hashCode());
 //        fixedPool();
 //        singlePool();
 //        scheduledPool();
+        int i=1;
+        System.out.println(15 * i == (i << 4) - i);
 
-        System.out.println(1 << 30);
+        System.out.println(1 << 4);
         System.out.println("第一次验证");
+        System.out.println(1010 & 1395272);
+        System.out.println(1010 & 1333833);
     }
 }
